@@ -17,8 +17,8 @@ bot.start(async (ctx) => {
     try {
         await ctx.reply(
             `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `                               ✨ <b>DIL IZHORIM</b> ✨\n` +
-            `                                        <b><i>by Munira</i></b>\n` +
+            `                          ✨ <b>DIL IZHORIM</b> ✨\n` +
+            `                                   <b><i>by Munira</i></b>\n` +
             `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
             `Yuragingizda aytolmay yurgan gaplaringiz bormi? \n` +
             `Yaqin insoningizni kutilmagan tarzda xursand qilmoqchimisiz? ❤️\n\n` +
@@ -69,8 +69,8 @@ bot.action('make_order', async (ctx) => {
 
         await ctx.reply(
             `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `                               ✨ <b>DIL IZHORIM</b> ✨\n` +
-            `                                        <b><i>by Munira</i></b>\n` +
+            `                          ✨ <b>DIL IZHORIM</b> ✨\n` +
+            `                                   <b><i>by Munira</i></b>\n` +
             `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
             `Yuragingizda aytolmay yurgan gaplaringiz bormi? \n` +
             `Yaqin insoningizni kutilmagan tarzda xursand qilmoqchimisiz? ❤️\n\n` +
