@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const Order = require('./models/Order');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-
+const Admin = require('./models/Admin');
 // MUHIM: Bot yaratilgandan keyin darhol session ni ulaymiz
 bot.use(session());
 
@@ -60,6 +60,56 @@ bot.start(async (ctx) => {
     }
 
 });
+
+// Admin qo'shish: /addadmin 12345678
+bot.command('addadmin', async (ctx) => {
+  if (ctx.from.id !== Number(process.env.SUPER_ADMIN_ID)) return;
+
+  const args = ctx.message.text.split(' ');
+  const newAdminId = Number(args[1]);
+
+  if (!newAdminId) {
+    return ctx.reply("❌ Xatolik! ID kiriting. Masalan: /addadmin 12345678");
+  }
+
+  try {
+    await Admin.create({ telegramId: newAdminId });
+    ctx.reply(`✅ Yangi admin (ID: ${newAdminId}) muvaffaqiyatli qo'shildi!`);
+  } catch (err) {
+    ctx.reply("⚠️ Bu ID allaqachon adminlar ro'yxatida bor.");
+  }
+});
+
+// Admin o'chirish: /deladmin 12345678
+bot.command('deladmin', async (ctx) => {
+  if (ctx.from.id !== Number(process.env.SUPER_ADMIN_ID)) return;
+
+  const args = ctx.message.text.split(' ');
+  const adminId = Number(args[1]);
+
+  await Admin.deleteOne({ telegramId: adminId });
+  ctx.reply(`❌ Admin (ID: ${adminId}) bazadan o'chirildi!`);
+});
+
+// Buyurtma tushganda barcha adminga xabar ketadigan funksiya
+async function notifyAllAdmins(messageText) {
+  const dbAdmins = await Admin.find({});
+  const adminIds = dbAdmins.map(a => a.telegramId);
+
+  if (process.env.SUPER_ADMIN_ID) {
+    adminIds.push(Number(process.env.SUPER_ADMIN_ID));
+  }
+
+  const uniqueAdmins = [...new Set(adminIds)];
+
+  for (const id of uniqueAdmins) {
+    try {
+      await bot.telegram.sendMessage(id, messageText);
+    } catch (err) {
+      console.log(`Adminga (${id}) xabar yuborishda xatolik:`, err.message);
+    }
+  }
+}
 // "Tabrik buyurtma berish" tugmasi bosilganda
 // 🎁 "Buyurtma berish" menyusi ochilganda
 bot.action('make_order', async (ctx) => {
@@ -1018,6 +1068,36 @@ bot.action('feedback_menu', async (ctx) => {
             }
         }
     );
+});
+
+// Admin qo'shish: /addadmin 12345678
+bot.command('addadmin', async (ctx) => {
+  if (ctx.from.id !== Number(process.env.SUPER_ADMIN_ID)) return;
+
+  const args = ctx.message.text.split(' ');
+  const newAdminId = Number(args[1]);
+
+  if (!newAdminId) {
+    return ctx.reply("❌ Xatolik! ID kiriting. Masalan: /addadmin 12345678");
+  }
+
+  try {
+    await Admin.create({ telegramId: newAdminId });
+    ctx.reply(`✅ Yangi admin (ID: ${newAdminId}) muvaffaqiyatli qo'shildi!`);
+  } catch (err) {
+    ctx.reply("⚠️ Bu ID allaqachon adminlar ro'yxatida bor.");
+  }
+});
+
+// Admin o'chirish: /deladmin 12345678
+bot.command('deladmin', async (ctx) => {
+  if (ctx.from.id !== Number(process.env.SUPER_ADMIN_ID)) return;
+
+  const args = ctx.message.text.split(' ');
+  const adminId = Number(args[1]);
+
+  await Admin.deleteOne({ telegramId: adminId });
+  ctx.reply(`❌ Admin (ID: ${adminId}) bazadan o'chirildi!`);
 });
 // Botni ishga tushirish
 bot.launch()
