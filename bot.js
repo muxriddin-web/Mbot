@@ -6,7 +6,7 @@ const Order = require('./models/Order');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const Admin = require('./models/Admin');
 // Sizning o'zingizning o'zgarmas asosiy Telegram ID raqamingiz (buni o'z ID raqamingizga o'zgartiring!)
-const SUPER_ADMIN_ID = 123456789; // <-- O'z ID raqamingizni yozing
+const SUPER_ADMIN_ID = 6380707116; // <-- O'z ID raqamingizni yozing
 // MUHIM: Bot yaratilgandan keyin darhol session ni ulaymiz
 bot.use(session());
 
