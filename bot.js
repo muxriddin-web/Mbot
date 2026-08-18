@@ -147,11 +147,11 @@ bot.action('make_order', async (ctx) => {
     }
 });
 
-// Xizmatlar turlari (3 ta kodni bitta joyga yig'dik: order_call / order_video / order_audio)
+// Xizmatlar turlari (3 ta tugma uchun bitta handler)
 const servicesData = {
-    'order_call': { type: 'Kutilmagan qo‘ng‘iroq', icon: '🎙', text: "Iltimos, bu kim uchun va qanday mazmunda bo'lishini yozib yuboring (Masalan: <i>Otamga, tug'ilgan kunlari uchun</i>):" },
-    'order_video': { type: 'Video rolik / Xotira', icon: '🎬', text: "Iltimos, kim uchun va qanday mavzuda bo'lishini yozib qoldiring:" },
-    'order_audio': { type: 'Ovoz yozish', icon: '🎧', text: "Iltimos, kim uchunligini yozib qoldiring (Masalan: <i>Otamga</i>):" }
+    'order_call': { type: 'Kutilmagan qo‘ng‘iroq', icon: '🎙' },
+    'order_video': { type: 'Video rolik / Xotira', icon: '🎬' },
+    'order_audio': { type: 'Ovoz yozish', icon: '🎧' }
 };
 
 bot.action(['order_call', 'order_video', 'order_audio'], async (ctx) => {
@@ -159,19 +159,51 @@ bot.action(['order_call', 'order_video', 'order_audio'], async (ctx) => {
         await ctx.answerCbQuery().catch(() => {});
         const action = ctx.match[0];
         const service = servicesData[action];
+        const userId = ctx.from.id;
 
-        ctx.session = { step: 'waiting_for_order_details', serviceType: service.type };
+        // 1. Bazadan mavjud adminlardan birini tanlaymiz
+        const admins = await Admin.find();
+        
+        if (!admins || admins.length === 0) {
+            return await safeEditOrReply(ctx, "Hozirda bog'lanish uchun adminlar mavjud emas. Iltimos, keyinroq urinib ko'ring.", {
+                inline_keyboard: [[{ text: '⬅️ Ortga qaytish', callback_data: 'make_order' }]]
+            });
+        }
+        
+        const assignedAdmin = admins[0]; // Mas'ul admin
 
-        const msgText = `${service.icon} <b>${service.type}</b> xizmatini tanladingiz.\n\n${service.text}`;
+        // 2. Buyurtmani bazaga saqlaymiz (matn va telefon so'ralmagani uchun ularsiz yoziladi)
+        await Order.create({
+            userId: userId,
+            recipientType: service.type, // Xizmat turi
+            clientPhone: 'Korsatilmagan', // Telefon talab qilinmagani uchun
+            assignedAdmin: assignedAdmin.telegramId,
+            status: 'pending',
+            createdAt: new Date()
+        });
+
+        // 3. Mijozga adminning profil havolasini yuboramiz
+        const adminLink = `tg://user?id=${assignedAdmin.telegramId}`;
+        
+        let msgText = `${service.icon} <b>${service.type}</b> xizmatini tanladingiz.\n\n`;
+        msgText += `✅ <b>Buyurtmangiz qabul qilindi!</b>\n\n`;
+        msgText += `Batafsil ma'lumot berish va buyurtmani kelishish uchun quyidagi havola orqali adminga yozib murojaat qiling:\n\n`;
+        msgText += `👤 <b>Admin bilan bog'lanish:</b> <a href="${adminLink}">${assignedAdmin.name || 'Admin'}</a>`;
+
         const keyboard = {
-            inline_keyboard: [[{ text: '⬅️ Ortga qaytish', callback_data: 'make_order' }]]
+            inline_keyboard: [
+                [{ text: '👤 Adminga yozish', url: adminLink }],
+                [{ text: '⬅️ Ortga qaytish', callback_data: 'make_order' }]
+            ]
         };
+
         await safeEditOrReply(ctx, msgText, keyboard);
+
     } catch (error) {
         console.log(`Xatolik (${ctx.match[0]}):`, error.message);
+        await ctx.reply("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.");
     }
 });
-
 // ==========================================
 // 1. ASOSIY MENYU VA ORTGA QAYTISH
 // (eski 'back_to_start' va 'back_to_start_from_video' — ikkita alohida
@@ -194,23 +226,49 @@ bot.action(/^cat_/, async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
         const categoryName = ctx.match.input.replace('cat_', '');
+        const userId = ctx.from.id;
 
-        if (categoryName === 'Boshqa') {
-            ctx.session = { step: 'waiting_for_custom_recipient' };
-            await safeEditOrReply(ctx,
-                `⚡ <b>Boshqa yo'nalish</b>\n────────────────────────\n✍️ Iltimos, tabrik <b>kim uchun</b> mo'ljallanganini matn ko'rinishida yozib yuboring:\n\n<i>(Masalan: Ukamga, Opamga, Ustozimga va hokazo)</i>`,
-                { inline_keyboard: [[{ text: '❌ Bekor qilish', callback_data: 'back_to_start' }]] }
-            );
-            return;
+        // 1. Bazadan mavjud adminlardan birini tanlaymiz
+        const admins = await Admin.find();
+        
+        if (!admins || admins.length === 0) {
+            return await safeEditOrReply(ctx, "Hozirda bog'lanish uchun adminlar mavjud emas. Iltimos, keyinroq urinib ko'ring.", {
+                inline_keyboard: [[{ text: '⬅️ Ortga qaytish', callback_data: 'back_to_start' }]]
+            });
         }
+        
+        const assignedAdmin = admins[0]; // Mas'ul admin
 
-        ctx.session = { selectedCategory: categoryName, step: 'waiting_for_client_phone' };
-        await safeEditOrReply(ctx,
-            `📌 <b>Tanlangan yo'nalish:</b> <code>${categoryName}</code>\n────────────────────────\n📞 <b>1-Qadam:</b> Iltimos, <b>o'zingizning bog'lanish uchun telefon raqamingizni</b> yuboring:\n\n<i>(Masalan: +998901234567)</i>`, 
-            { inline_keyboard: [[{ text: '❌ Bekor qilish', callback_data: 'back_to_start' }]] }
-        );
+        // 2. Buyurtmani bazaga saqlaymiz (telefon va matnsiz)
+        await Order.create({
+            userId: userId,
+            recipientType: categoryName, // Kategoriya nomi
+            clientPhone: 'Korsatilmagan',
+            assignedAdmin: assignedAdmin.telegramId,
+            status: 'pending',
+            createdAt: new Date()
+        });
+
+        // 3. Mijozga adminning profil havolasini yuboramiz
+        const adminLink = `tg://user?id=${assignedAdmin.telegramId}`;
+        
+        let msgText = `📌 <b>Tanlangan yo'nalish:</b> <code>${categoryName}</code>\n\n`;
+        msgText += `✅ <b>Buyurtmangiz qabul qilindi!</b>\n\n`;
+        msgText += `Batafsil ma'lumot berish va buyurtmani kelishish uchun quyidagi havola orqali adminga yozib murojaat qiling:\n\n`;
+        msgText += `👤 <b>Admin bilan bog'lanish:</b> <a href="${adminLink}">${assignedAdmin.name || 'Admin'}</a>`;
+
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '👤 Adminga yozish', url: adminLink }],
+                [{ text: '⬅️ Ortga qaytish', callback_data: 'back_to_start' }]
+            ]
+        };
+
+        await safeEditOrReply(ctx, msgText, keyboard);
+
     } catch (error) {
         console.log('Xatolik (category):', error.message);
+        await ctx.reply("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.");
     }
 });
 // Matn kelganda bosqichma-bosqich qabul qilish
@@ -296,132 +354,6 @@ bot.on('text', async (ctx) => {
         }
     }
 
-    // ==========================================
-    // 2. XIZMAT TAFSILOTI (Masalan: Ovoz yozish - Otamga)
-    // ==========================================
-    if (ctx.session.step === 'waiting_for_order_details') {
-        if (text.length < 2) return;
-
-        ctx.session.selectedCategory = `${ctx.session.serviceType}: ${text}`;
-        ctx.session.step = 'waiting_for_client_phone';
-
-        await updateMenu(
-            `📌 <b>Xizmat va yo'nalish:</b> <code>${ctx.session.selectedCategory}</code>\n` +
-            `────────────────────────\n` +
-            `📞 Iltimos, <b>telefon raqamingizni</b> yuboring:\n\n` +
-            `<i>(Masalan: +998901234567)</i>`,
-            {
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Bekor qilish', callback_data: 'back_to_start' }]]
-                }
-            }
-        );
-        return;
-    }
-
-    // ==========================================
-    // 3. "BOSHQA" UCHUN QABUL QILISH
-    // ==========================================
-    if (ctx.session.step === 'waiting_for_custom_recipient') {
-        if (text.length < 2) return;
-
-        ctx.session.selectedCategory = text;
-        ctx.session.step = 'waiting_for_client_phone';
-
-        await updateMenu(
-            `📌 <b>Tanlangan yo'nalish:</b> <code>${text}</code>\n` +
-            `────────────────────────\n` +
-            `📞 Iltimos, <b>telefon raqamingizni</b> yuboring:\n\n` +
-            `<i>(Masalan: +998901234567)</i>`,
-            {
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Bekor qilish', callback_data: 'back_to_start' }]]
-                }
-            }
-        );
-        return;
-    }
-
-// ==========================================
-    // 4. MIJOZ RAQAMINI QABUL QILISH VA BUYURTMANI SAQLASH
-    // ==========================================
-    if (ctx.session.step === 'waiting_for_client_phone') {
-        // O'zgartirilgan qator:
-        if (!phoneRegex.test(text)) {
-            return ctx.reply("⚠️ Iltimos, raqamni to'g'ri formatda kiriting.\nMasalan: +998901234567");
-        }
-        const recipientType = ctx.session.selectedCategory; 
-        const clientPhone = text; 
-
-        try {
-            // 1. Bazadagi barcha adminlarni va Super Adminni olamiz
-            const admins = await Admin.find({});
-            const allAdminIds = [SUPER_ADMIN_ID, ...admins.map(a => Number(a.telegramId))];
-            
-            let assignedAdminId = null;
-
-            if (allAdminIds.length > 0) {
-                // Bazadagi jami buyurtmalar sonini sanaymiz
-                const totalOrders = await Order.countDocuments();
-                
-                // Navbatdagi adminni bazadagilar orasidan tanlaymiz
-                assignedAdminId = Number(allAdminIds[totalOrders % allAdminIds.length]);
-            }
-
-            // Buyurtmani bazaga saqlash
-            const newOrder = new Order({
-                userId: userId,
-                recipientType: recipientType,
-                clientPhone: clientPhone,
-                assignedAdmin: assignedAdminId,
-                status: 'pending'
-            });
-
-            await newOrder.save();
-
-            // Mijozga javob yuborish
-            await updateMenu(
-                `✨ <b>Buyurtmangiz muvaffaqiyatli qabul qilindi!</b> ✨\n` +
-                `────────────────────────\n` +
-                `📌 <b>Yo'nalish:</b> <code>${recipientType}</code>\n` +
-                `👤 <b>Sizning raqamingiz:</b> <code>${clientPhone}</code>\n` +
-                `────────────────────────\n` +
-                `⏳ <i>Tez orada mas'ul adminimiz siz bilan bog'lanadi!</i>`, 
-                {
-                    parse_mode: 'HTML',
-                    reply_markup: {
-                        inline_keyboard: [[{ text: '🏠 Bosh sahifaga qaytish', callback_data: 'back_to_start' }]]
-                    }
-                }
-            );
-
-            // Faqat biriktirilgan (navbatdagi) adminga xabar yuborish
-            if (assignedAdminId) {
-                const adminMessage = `🔔 <b>YANGI BUYURTMA (SIZGA BIRIKTIRILDI)!</b>\n` +
-                                     `────────────────────────\n` +
-                                     `👤 <b>Mijoz:</b> ${userFirstName} (${username})\n` +
-                                     `🆔 <b>Telegram ID:</b> <code>${userId}</code>\n` +
-                                     `🎁 <b>Yo'nalish:</b> <b>${recipientType}</b>\n` +
-                                     `────────────────────────\n` +
-                                     `📞 <b>Mijoz raqami:</b> <code>${clientPhone}</code>\n` +
-                                     `────────────────────────`;
-
-                try {
-                    await bot.telegram.sendMessage(assignedAdminId, adminMessage, { parse_mode: 'HTML' });
-                } catch (err) {
-                    console.error(`Adminga xabar yuborishda xatolik (${assignedAdminId}):`, err);
-                }
-            }
-
-            ctx.session = null;
-        } catch (err) {
-            console.error('Buyurtmani saqlashda xatolik:', err);
-            ctx.session = null;
-        }
-        return;
-    }
     // ==========================================
     // 5. SANA UCHUN ISMNI KUTISH
     // ==========================================
