@@ -1,12 +1,26 @@
 require('dotenv').config();
 const { Telegraf, session } = require('telegraf');
 const mongoose = require('mongoose');
+const cron = require('node-cron');
 const Order = require('./models/Order');
-
-const bot = new Telegraf(process.env.BOT_TOKEN);
 const Admin = require('./models/Admin');
-// Sizning o'zingizning o'zgarmas asosiy Telegram ID raqamingiz (buni o'z ID raqamingizga o'zgartiring!)
+const Birthday = require('./models/Birthday');
+
+// ==========================================
+// ✅ TUZATISH #1: BOT_TOKEN mavjudligini va to'g'riligini ishga tushishdanoq tekshirish
+// (server "tokenni tanimadi" xatosi berganda, aynan shu joy sababni darhol ko'rsatadi)
+// ==========================================
+const BOT_TOKEN = (process.env.BOT_TOKEN || '').trim();
+if (!BOT_TOKEN) {
+    console.error('❌ XATOLIK: BOT_TOKEN topilmadi yoki bo\'sh! .env fayli bot.js bilan BIR XIL papkada ekanligini va ichida BOT_TOKEN=... qatori borligini tekshiring.');
+    process.exit(1);
+}
+
+const bot = new Telegraf(BOT_TOKEN);
+
+// Sizning o'zingizning o'zgarmas asosiy Telegram ID raqamingiz
 const SUPER_ADMIN_ID = 6380707116; // <-- O'z ID raqamingizni yozing
+
 // MUHIM: Bot yaratilgandan keyin darhol session ni ulaymiz
 bot.use(session());
 
@@ -14,21 +28,36 @@ bot.use(session());
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ MongoDB bazasiga muvaffaqiyatli ulandi!'))
     .catch((err) => console.error('❌ Bazaga ulanishda xatolik:', err));
-    // 1. Funksiyani shu yerga qo'shasiz (buyruqlardan oldinroqqa)
+
 async function isAdmin(telegramId) {
   if (Number(telegramId) === Number(SUPER_ADMIN_ID)) return true;
   const admin = await Admin.findOne({ telegramId: Number(telegramId) });
-  return !!admin && admin.isActive; // agar isActive maydoni bo'lsa, faqat aktiv adminlarni o'tkazadi
+  return !!admin && admin.isActive;
 }
 
-// 2. Keyin o'zingizning /addadmin va boshqa buyruqlaringizni yozib ketaverasiz
+// ==========================================
+// ✅ TUZATISH #2: Navbat bilan (round-robin) admin biriktirish
+// Admin.js sxemasida shu maqsad uchun tayyor turgan "activeOrdersCount" maydonidan
+// foydalanamiz: har doim ENG KAM buyurtma olgan faol adminga navbat beriladi.
+// Natijada: 1-mijoz -> 1-admin, 2-mijoz -> 2-admin, ... va h.k. avtomatik ta'minlanadi,
+// hattoki adminlar sonini keyinchalik o'zgartirsangiz ham adolatli taqsimlanadi.
+// Bu funksiya faqat isActive:true bo'lgan (ya'ni superadmin o'chirib qo'ymagan)
+// yordamchi adminlarni ko'rib chiqadi — superadminning o'zi mijozlarga hech qachon
+// ko'rsatilmaydi.
+// ==========================================
+async function getNextAvailableAdmin() {
+    const activeAdmins = await Admin.find({ isActive: true }).sort({ activeOrdersCount: 1, _id: 1 });
+    if (!activeAdmins.length) return null;
+
+    const chosen = activeAdmins[0];
+    // Tanlangan adminning hisoblagichini oshiramiz, shunda keyingi mijoz boshqa adminga tushadi
+    await Admin.updateOne({ _id: chosen._id }, { $inc: { activeOrdersCount: 1 } });
+    return chosen;
+}
 
 // ==========================================
-// 🚀 OPTIMALLASHTIRILGAN UMUMIY QISM (yangi qo'shildi)
-// Bosh menyu matni va tugmalari endi bitta joyda saqlanadi (const),
-// shuning uchun bir nechta joyda uni qayta-qayta yozish shart emas.
+// 🚀 UMUMIY QISM — Bosh menyu matni va tugmalari bitta joyda saqlanadi
 // ==========================================
-// Bosh menyu matni (takrorlanmasligi uchun alohida o'zgaruvchiga olindi)
 const START_MENU_TEXT = `━━━━━━━━━━━━━━━━━━━━━━\n` +
     `                          ✨ <b>DIL IZHORIM</b> ✨\n` +
     `                                  <b><i>by Munira</i></b>\n` +
@@ -55,7 +84,6 @@ const START_MENU_TEXT = `━━━━━━━━━━━━━━━━━━�
     `─────────────────────\n` +
     `👇 <b>Kerakli bo'limni tanlang:</b>`;
 
-// Bosh menyu tugmalari
 const START_MENU_KEYBOARD = {
     inline_keyboard: [
         [{ text: '🎁 Tabrik buyurtma berish', callback_data: 'make_order' }],
@@ -78,58 +106,20 @@ async function safeEditOrReply(ctx, text, keyboard) {
 }
 
 // /start komandasi
+// ✅ TUZATISH #3: endi START_MENU_TEXT/KEYBOARD qayta ishlatiladi (oldin matn shu yerda
+// yana bir marta qo'lda yozilgan edi va asl matndan ozgina farq qilib qolgan edi)
 bot.start(async (ctx) => {
     try {
-        await ctx.reply(
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `                          ✨ <b>DIL IZHORIM</b> ✨\n` +
-            `                                   <b><i>by Munira</i></b>\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-            `Yuragingizda aytolmay yurgan gaplaringiz bormi? \n` +
-            `Yaqin insoningizni kutilmagan tarzda xursand qilmoqchimisiz? ❤️\n\n` +
-            `─────────────────────\n` +
-            `🎙 <b>KUTILMAGAN QO‘NG‘IROQ</b>\n` +
-            `<i>Boshlovchimiz tomonidan jonli ijroda:</i>\n` +
-            `• 💌 Aytolmagan dil izhorlaringiz\n` +
-            `• 🎂 Tug‘ilgan kun tabriklari\n` +
-            `• 🥹 Uzrnomalar\n` +
-            `• 🤍 Minnatdorchilik maktublari\n` +
-            `• 👩‍👩‍👧 Yaqinlarga samimiy tilaklar\n\n` +
-            `🎧 <b>PROFESSIONAL OVOZ YOZISH</b>\n` +
-            `<i>Maxsus matnlarni professional ovozda yozib beramiz.</i>\n\n` +
-            `🎬 <b>VIDEO ROLIK & XOTIRALAR</b>\n` +
-            `<i>Yubiley, sevgi va eng qadrli suratlaringizdan unutilmas video montaj.</i>\n` +
-            `─────────────────────\n` +
-            `✨ <b>NIMA UCHUN BIZNI TANLASHADI?</b>\n` +
-            `  ✅ Har bir buyurtma individual\n` +
-            `  ✅ Professional ovoz va ijro\n` +
-            `  ✅ Sifatli va ta'sirli yondashuv\n` +
-            `─────────────────────\n` +
-            `👇 <b>Kerakli bo'limni tanlang:</b>`,
-            {
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🎁 Tabrik buyurtma berish', callback_data: 'make_order' }],
-                        [{ text: '📂 Namunaviy videolar', callback_data: 'samples' }],
-                        [{ text: '⭐ Chegirmalar va Aksiyalar', callback_data: 'discounts' }],
-                        [{ text: '📅 Muhim sanalarni saqlash', callback_data: 'birthdays_menu' }],
-                        [{ text: '📞 Biz bilan bog\'lanish', callback_data: 'contact_admin' }],
-                        [{ text: '✍️ Fikr-mulohaza qoldirish', callback_data: 'feedback_menu' }]
-                    ]
-                }
-            }
-        );
+        await ctx.reply(START_MENU_TEXT, {
+            parse_mode: 'HTML',
+            reply_markup: START_MENU_KEYBOARD
+        });
     } catch (error) {
         console.log('Xatolik (start):', error.message);
     }
-
 });
 
 // "Tabrik buyurtma berish" tugmasi bosilganda
-// ==========================================
-// 2. BUYURTMA BERISH MENYUSI
-// ==========================================
 bot.action('make_order', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -154,6 +144,8 @@ const servicesData = {
     'order_audio': { type: 'Ovoz yozish', icon: '🎧' }
 };
 
+// ✅ TUZATISH #4: admin.name -> admin.fullName, isActive filtri, navbat bilan
+// biriktirish (getNextAvailableAdmin) va telefon raqamini ham xabarga qo'shish
 bot.action(['order_call', 'order_video', 'order_audio'], async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -161,34 +153,35 @@ bot.action(['order_call', 'order_video', 'order_audio'], async (ctx) => {
         const service = servicesData[action];
         const userId = ctx.from.id;
 
-        // 1. Bazadan mavjud adminlardan birini tanlaymiz
-        const admins = await Admin.find();
-        
-        if (!admins || admins.length === 0) {
+        // 1. Navbatdagi (eng kam bandligi bo'lgan) faol adminni tanlaymiz
+        const assignedAdmin = await getNextAvailableAdmin();
+
+        if (!assignedAdmin) {
             return await safeEditOrReply(ctx, "Hozirda bog'lanish uchun adminlar mavjud emas. Iltimos, keyinroq urinib ko'ring.", {
                 inline_keyboard: [[{ text: '⬅️ Ortga qaytish', callback_data: 'make_order' }]]
             });
         }
-        
-        const assignedAdmin = admins[0]; // Mas'ul admin
 
-        // 2. Buyurtmani bazaga saqlaymiz (matn va telefon so'ralmagani uchun ularsiz yoziladi)
+        // 2. Buyurtmani bazaga saqlaymiz
         await Order.create({
             userId: userId,
-            recipientType: service.type, // Xizmat turi
-            clientPhone: 'Korsatilmagan', // Telefon talab qilinmagani uchun
+            recipientType: service.type,
+            clientPhone: 'Korsatilmagan',
             assignedAdmin: assignedAdmin.telegramId,
             status: 'pending',
             createdAt: new Date()
         });
 
-        // 3. Mijozga adminning profil havolasini yuboramiz
+        // 3. Mijozga adminning profil havolasi VA telefon raqamini yuboramiz
         const adminLink = `tg://user?id=${assignedAdmin.telegramId}`;
-        
+
         let msgText = `${service.icon} <b>${service.type}</b> xizmatini tanladingiz.\n\n`;
         msgText += `✅ <b>Buyurtmangiz qabul qilindi!</b>\n\n`;
-        msgText += `Batafsil ma'lumot berish va buyurtmani kelishish uchun quyidagi havola orqali adminga yozib murojaat qiling:\n\n`;
-        msgText += `👤 <b>Admin bilan bog'lanish:</b> <a href="${adminLink}">${assignedAdmin.name || 'Admin'}</a>`;
+        msgText += `Batafsil ma'lumot berish va buyurtmani kelishish uchun quyidagi ma'lumotlar orqali adminga murojaat qiling:\n\n`;
+        msgText += `👤 <b>Admin:</b> <a href="${adminLink}">${assignedAdmin.fullName || 'Admin'}</a>\n`;
+        if (assignedAdmin.phone && assignedAdmin.phone !== 'Kiritilmagan') {
+            msgText += `📱 <b>Telefon:</b> <code>${assignedAdmin.phone}</code>`;
+        }
 
         const keyboard = {
             inline_keyboard: [
@@ -204,10 +197,9 @@ bot.action(['order_call', 'order_video', 'order_audio'], async (ctx) => {
         await ctx.reply("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.");
     }
 });
+
 // ==========================================
-// 1. ASOSIY MENYU VA ORTGA QAYTISH
-// (eski 'back_to_start' va 'back_to_start_from_video' — ikkita alohida
-// handler bitta handlerga birlashtirildi, chunki ikkalasi ham bir xil ish qilardi)
+// ASOSIY MENYU VA ORTGA QAYTISH
 // ==========================================
 bot.action(['back_to_start', 'back_to_start_from_video'], async (ctx) => {
     try {
@@ -220,7 +212,9 @@ bot.action(['back_to_start', 'back_to_start_from_video'], async (ctx) => {
 });
 
 // ==========================================
-// 3. KATEGORIYALAR (cat_...)
+// KATEGORIYALAR (cat_...) — hozircha hech qanday tugma bu handlerni chaqirmaydi
+// (kelajakda ishlatish uchun qoldirildi), lekin izchillik uchun shu yerda ham
+// xuddi yuqoridagi kabi tuzatildi.
 // ==========================================
 bot.action(/^cat_/, async (ctx) => {
     try {
@@ -228,34 +222,32 @@ bot.action(/^cat_/, async (ctx) => {
         const categoryName = ctx.match.input.replace('cat_', '');
         const userId = ctx.from.id;
 
-        // 1. Bazadan mavjud adminlardan birini tanlaymiz
-        const admins = await Admin.find();
-        
-        if (!admins || admins.length === 0) {
+        const assignedAdmin = await getNextAvailableAdmin();
+
+        if (!assignedAdmin) {
             return await safeEditOrReply(ctx, "Hozirda bog'lanish uchun adminlar mavjud emas. Iltimos, keyinroq urinib ko'ring.", {
                 inline_keyboard: [[{ text: '⬅️ Ortga qaytish', callback_data: 'back_to_start' }]]
             });
         }
-        
-        const assignedAdmin = admins[0]; // Mas'ul admin
 
-        // 2. Buyurtmani bazaga saqlaymiz (telefon va matnsiz)
         await Order.create({
             userId: userId,
-            recipientType: categoryName, // Kategoriya nomi
+            recipientType: categoryName,
             clientPhone: 'Korsatilmagan',
             assignedAdmin: assignedAdmin.telegramId,
             status: 'pending',
             createdAt: new Date()
         });
 
-        // 3. Mijozga adminning profil havolasini yuboramiz
         const adminLink = `tg://user?id=${assignedAdmin.telegramId}`;
-        
+
         let msgText = `📌 <b>Tanlangan yo'nalish:</b> <code>${categoryName}</code>\n\n`;
         msgText += `✅ <b>Buyurtmangiz qabul qilindi!</b>\n\n`;
-        msgText += `Batafsil ma'lumot berish va buyurtmani kelishish uchun quyidagi havola orqali adminga yozib murojaat qiling:\n\n`;
-        msgText += `👤 <b>Admin bilan bog'lanish:</b> <a href="${adminLink}">${assignedAdmin.name || 'Admin'}</a>`;
+        msgText += `Batafsil ma'lumot berish va buyurtmani kelishish uchun quyidagi ma'lumotlar orqali adminga murojaat qiling:\n\n`;
+        msgText += `👤 <b>Admin:</b> <a href="${adminLink}">${assignedAdmin.fullName || 'Admin'}</a>\n`;
+        if (assignedAdmin.phone && assignedAdmin.phone !== 'Kiritilmagan') {
+            msgText += `📱 <b>Telefon:</b> <code>${assignedAdmin.phone}</code>`;
+        }
 
         const keyboard = {
             inline_keyboard: [
@@ -271,6 +263,7 @@ bot.action(/^cat_/, async (ctx) => {
         await ctx.reply("Xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.");
     }
 });
+
 // Matn kelganda bosqichma-bosqich qabul qilish
 bot.on('text', async (ctx) => {
     if (!ctx.session || !ctx.session.step) return;
@@ -279,14 +272,11 @@ bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const userFirstName = ctx.from.first_name || 'Foydalanuvchi';
     const username = ctx.from.username ? `@${ctx.from.username}` : 'Username yo\'q';
-    const phoneRegex = /^\+?998\d{9}$/;
 
-    // Foydalanuvchi yuborgan yangi xabarni darhol o'chiramiz (Chat toza turadi)
     try {
         await ctx.deleteMessage().catch(() => {});
     } catch (e) {}
 
-    // Botning mavjud xabarini tahrirlash uchun yordamchi funksiya
     const updateMenu = async (messageText, extra = {}) => {
         let edited = false;
         if (ctx.session.lastMessageId) {
@@ -303,25 +293,23 @@ bot.on('text', async (ctx) => {
                 edited = false;
             }
         }
-        // Agar edit o'xshamasa (masalan xabar o'chirilgan bo'lsa), yangisini yuborib saqlaymiz
         if (!edited) {
             const sentMsg = await ctx.reply(messageText, extra);
             ctx.session.lastMessageId = sentMsg.message_id;
         }
     };
 
-// ==========================================
-    // 1. ✍️ FIKR-MULOHAZANI QABUL QILISH
+    // ==========================================
+    // ✍️ FIKR-MULOHAZANI QABUL QILISH
     // ==========================================
     if (ctx.session.step === 'waiting_for_feedback') {
         if (text.length < 3) return;
 
         try {
-            // 1. Bazadagi va Super Adminni yig'amiz
             const admins = await Admin.find({});
             const allAdminIds = [SUPER_ADMIN_ID, ...admins.map(a => Number(a.telegramId))];
 
-            const adminMessage = 
+            const adminMessage =
                 `💬 <b>YANGI FIKR-MULOHAZA / TAKLIF!</b>\n` +
                 `────────────────────────\n` +
                 `👤 <b>Foydalanuvchi:</b> ${userFirstName} (${username})\n` +
@@ -355,7 +343,7 @@ bot.on('text', async (ctx) => {
     }
 
     // ==========================================
-    // 5. SANA UCHUN ISMNI KUTISH
+    // SANA UCHUN ISMNI KUTISH
     // ==========================================
     if (ctx.session.step === 'waiting_for_bday_name') {
         if (text.length < 2) return;
@@ -379,10 +367,10 @@ bot.on('text', async (ctx) => {
     }
 
     // ==========================================
-    // 6. SANANI KUTISH VA SAQLASH
+    // SANANI KUTISH VA SAQLASH
     // ==========================================
     if (ctx.session.step === 'waiting_for_bday_date') {
-        const parts = text.split('.'); 
+        const parts = text.split('.');
         if (parts.length !== 2) return;
 
         const day = parseInt(parts[0]);
@@ -392,21 +380,21 @@ bot.on('text', async (ctx) => {
 
         try {
             const newBirthday = new Birthday({
-                userId: ctx.from.id, 
+                userId: ctx.from.id,
                 recipientName: ctx.session.bdayName,
-                day: day,  
-                month: month 
+                day: day,
+                month: month
             });
 
             await newBirthday.save();
 
             const months = ['', 'yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr'];
-            
+
             await updateMenu(
                 `✨ <b>Sana muvaffaqiyatli saqlandi!</b> ✨\n` +
                 `────────────────────────\n` +
                 `👤 <b>Kim uchun:</b> <code>${ctx.session.bdayName}</code>\n` +
-                `📅 <b>Sana:</b> <code>${day}-${months[month]}</code>\n` + 
+                `📅 <b>Sana:</b> <code>${day}-${months[month]}</code>\n` +
                 `────────────────────────\n` +
                 `🔔 <i>Sana yaqinlashganda sizga o'z vaqtida eslatma yuboramiz!</i>`,
                 {
@@ -424,8 +412,9 @@ bot.on('text', async (ctx) => {
         return;
     }
 });
+
 // ////////////////////////////////////////////////
-// Namunaviy videolar bazasi (kod ichida saqlanadi, MongoDB'ni band qilmaydi)
+// Namunaviy videolar bazasi
 // ////////////////////////////////////////////////
 const sampleVideos = {
     'Otamga': {
@@ -456,12 +445,9 @@ const sampleVideos = {
                  `💬 <i>Romantik va yurakdan chiqqan tabrik namunasi.</i>\n\n` +
                  `🔗 <b>To'liq ko'rish:</b> https://t.me/Dil_izhorim_M`
     }
-    // 'Boshqa' bu yerdan olib tashlandi, chunki u pastda alohida havolali action bo'ladi
 };
-// ==========================================
-// 4. NAMUNAVIY VIDEOLAR
-// ==========================================
-// 📂 "Namunaviy videolar" tugmasi bosilganda (Asosiy xabarni yangilaymiz)
+
+// 📂 "Namunaviy videolar" tugmasi bosilganda
 bot.action('samples', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -469,11 +455,11 @@ bot.action('samples', async (ctx) => {
         const keyboard = {
             inline_keyboard: [
                 [
-                    { text: '👨 Otamga', callback_data: 'sample_Otamga' }, 
+                    { text: '👨 Otamga', callback_data: 'sample_Otamga' },
                     { text: '👩 Onamga', callback_data: 'sample_Onamga' }
                 ],
                 [
-                    { text: '🤝 Opa-Singil', callback_data: 'sample_Opa-Singil' }, 
+                    { text: '🤝 Opa-Singil', callback_data: 'sample_Opa-Singil' },
                     { text: '❤️ Sevgan insonga', callback_data: 'sample_Sevgan' },
                     { text: '⚡ Boshqa insonga', callback_data: 'sample_Boshqa' }
                 ],
@@ -485,7 +471,7 @@ bot.action('samples', async (ctx) => {
         console.log('Xatolik (samples):', error.message);
     }
 });
-// ⚡ "Boshqa insonga" namunaviy video tugmasi bosilganda kanal havolasini chiqarish
+
 bot.action('sample_Boshqa', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -503,7 +489,6 @@ bot.action('sample_Boshqa', async (ctx) => {
     }
 });
 
-// Qaysidir namunaviy video tugmasi bosilganda
 bot.action(/^sample_/, async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -511,10 +496,8 @@ bot.action(/^sample_/, async (ctx) => {
         const sampleData = sampleVideos[sampleKey];
 
         if (sampleData) {
-            // Oldingi menyu xabarini o'chirib yuboramiz
             try { await ctx.deleteMessage(); } catch (e) {}
 
-            // Videoni yangi xabar qilib yuboramiz
             await ctx.replyWithVideo(sampleData.videoUrl, {
                 caption: sampleData.caption,
                 parse_mode: 'HTML',
@@ -534,9 +517,8 @@ bot.action(/^sample_/, async (ctx) => {
 });
 
 // ==========================================
-// 5. QO'SHIMCHA BO'LIMLAR (Chegirma, Sanalar, Aloqa)
+// QO'SHIMCHA BO'LIMLAR (Chegirma, Sanalar, Aloqa)
 // ==========================================
-// ⭐ "Chegirmalar va Aksiyalar" tugmasi bosilganda
 bot.action('discounts', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -558,7 +540,7 @@ bot.action('discounts', async (ctx) => {
             `────────────────────────\n\n` +
             `📲 <b>AKSIYADAN FOYDALANISH UCHUN</b>\n\n` +
             `Buyurtmangizni hoziroq rasmiylashtiring va <b>“Dil izhorim by Munira”</b>ning maxsus chegirma va bonuslariga ega bo‘ling! 💌`;
-        
+
         const keyboard = {
             inline_keyboard: [
                 [{ text: '🎁 Hozir buyurtma berish', callback_data: 'make_order' }],
@@ -570,8 +552,6 @@ bot.action('discounts', async (ctx) => {
         console.log('Xatolik (discounts):', error.message);
     }
 });
-const Birthday = require('./models/Birthday'); // Modelni chaqirib qo'yamiz
-const cron = require('node-cron');
 
 // 📅 "Muhim sanalar" menyusi
 bot.action('birthdays_menu', async (ctx) => {
@@ -589,7 +569,7 @@ bot.action('birthdays_menu', async (ctx) => {
             `❤️ <b>Siz uchun muhim bo‘lgan boshqa sanalarni</b>\n\n` +
             `botimizga kiritib qo‘ying.\n\n` +
             `🔔 <i>Biz esa muhim sana yaqinlashganda sizga eslatma yuboramiz.</i>`;
-            
+
         const keyboard = {
             inline_keyboard: [
                 [{ text: '➕ Sanani qo\'shish', callback_data: 'add_birthday_start' }],
@@ -603,7 +583,6 @@ bot.action('birthdays_menu', async (ctx) => {
     }
 });
 
-// Sanani qo'shish jarayonini boshlash
 bot.action('add_birthday_start', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -616,7 +595,7 @@ bot.action('add_birthday_start', async (ctx) => {
         console.log('Xatolik (add_birthday_start):', error.message);
     }
 });
-// Mijozning saqlangan sanalarini ko'rsatish
+
 bot.action('view_my_birthdays', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -638,16 +617,16 @@ bot.action('view_my_birthdays', async (ctx) => {
         console.log('Xatolik (view_my_birthdays):', error.message);
     }
 });
+
 // Har kuni soat 09:00 da ishlaydi va ertangi kun uchun eslatma yuboradi
 cron.schedule('0 9 * * *', async () => {
     try {
         const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1); // Ertangi kunni olamiz
+        tomorrow.setDate(tomorrow.getDate() + 1);
 
         const tDay = tomorrow.getDate();
-        const tMonth = tomorrow.getMonth() + 1; // JavaScript'da oylar 0 dan boshlangani uchun +1
+        const tMonth = tomorrow.getMonth() + 1;
 
-        // Alohida bazadan ertangi kunga to'g'ri keladigan sanalarni qidiramiz
         const upcomingBirthdays = await Birthday.find({ day: tDay, month: tMonth });
 
         for (const item of upcomingBirthdays) {
@@ -675,7 +654,7 @@ cron.schedule('0 9 * * *', async () => {
         console.log('Cron xatoligi:', error.message);
     }
 });
-// 📞 "Biz bilan bog'lanish" menyusi ochilganda
+
 bot.action('contact_admin', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
@@ -685,7 +664,7 @@ bot.action('contact_admin', async (ctx) => {
             `📱 <b>Telefon raqam:</b> <code>+998 87 951 03 97</code>\n` +
             `⏰ <b>Ish vaqti:</b> 24/7 dam olish kunisiz\n\n` +
             `💬 <i>Murojaatingizni yozib qoldirishingiz mumkin, admin tez orada javob beradi!</i>`;
-            
+
         const keyboard = {
             inline_keyboard: [
                 [{ text: '✍️ Adminga yozish', url: 'https://t.me/Elnurovna_777' }],
@@ -698,13 +677,12 @@ bot.action('contact_admin', async (ctx) => {
     }
 });
 
-// ✍️ Fikr-mulohaza menyusi ochilganda
 bot.action('feedback_menu', async (ctx) => {
     try {
         await ctx.answerCbQuery().catch(() => {});
-        ctx.session = { 
+        ctx.session = {
             step: 'waiting_for_feedback',
-            lastMessageId: ctx.callbackQuery.message.message_id 
+            lastMessageId: ctx.callbackQuery.message.message_id
         };
         await safeEditOrReply(ctx,
             `✍️ <b>FIKR-MULOHAZA</b>\n\nXizmatlarimiz haqida fikr yoki taklifingizni yozib yuboring:`,
@@ -714,38 +692,47 @@ bot.action('feedback_menu', async (ctx) => {
         console.log('Xatolik (feedback_menu):', error.message);
     }
 });
+
 // ==========================================
 // 👑 ADMINLARNI BOSHQARISH BUYRUQLARI
 // ==========================================
 
-// 1. Yangi admin qo'shish: /addadmin 12345678 Ism
+// 1. Yangi admin qo'shish: /addadmin 12345678 Ism Familiya
+// ✅ TUZATISH #5: SUPER_ADMIN_ID konstantasidan foydalanamiz (qattiq kodlangan son emas),
+// ism bir necha so'zdan iborat bo'lsa ham to'liq olinadi, va eng muhimi — xatolik
+// yuz berganda HAQIQIY sababni ko'rsatamiz (ilgari bu yashiringan edi)
 bot.command('addadmin', async (ctx) => {
-  if (ctx.from.id !== Number(SUPER_ADMIN_ID)) return;
+  if (ctx.from.id !== SUPER_ADMIN_ID) return;
 
   const args = ctx.message.text.split(' ');
   const newAdminId = Number(args[1]);
-  const adminName = args[2] || 'Admin';
+  const adminName = args.slice(2).join(' ') || 'Admin';
 
   if (!newAdminId || isNaN(newAdminId)) {
     return ctx.reply("❌ Xatolik! ID va ismni kiriting.\nMasalan: `/addadmin 12345678 Alisher`", { parse_mode: 'Markdown' });
   }
 
   try {
-    await Admin.create({ 
+    await Admin.create({
       telegramId: newAdminId,
       fullName: adminName,
-      phone: "Kiritilmagan", // Sizning modeldagi majburiy maydon uchun
+      phone: "Kiritilmagan",
       isActive: true
     });
     ctx.reply(`✅ Yangi admin (ID: ${newAdminId}, Ism: ${adminName}) muvaffaqiyatli qo'shildi!`);
   } catch (err) {
-    ctx.reply("⚠️ Bu ID allaqachon adminlar ro'yxatida bor yoki xatolik yuz berdi.");
+    console.error('❌ Admin qo\'shishda xatolik:', err);
+    if (err.code === 11000) {
+      ctx.reply("⚠️ Bu ID allaqachon adminlar ro'yxatida bor.");
+    } else {
+      ctx.reply(`⚠️ Xatolik yuz berdi: ${err.message}`);
+    }
   }
 });
 
 // 2. Admin o'chirish: /deladmin 12345678
 bot.command('deladmin', async (ctx) => {
-  if (ctx.from.id !== Number(SUPER_ADMIN_ID)) return;
+  if (ctx.from.id !== SUPER_ADMIN_ID) return;
 
   const args = ctx.message.text.split(' ');
   const adminId = Number(args[1]);
@@ -754,18 +741,59 @@ bot.command('deladmin', async (ctx) => {
     return ctx.reply("❌ Xatolik! O'chiriladigan admin ID sini kiriting.\nMasalan: `/deladmin 12345678`", { parse_mode: 'Markdown' });
   }
 
-  const result = await Admin.deleteOne({ telegramId: adminId });
-  
-  if (result.deletedCount > 0) {
-    ctx.reply(`❌ Admin (ID: ${adminId}) bazadan o'chirildi!`);
-  } else {
-    ctx.reply(`⚠️ Bunday ID raqamdagi admin bazadan topilmadi.`);
+  try {
+    const result = await Admin.deleteOne({ telegramId: adminId });
+    if (result.deletedCount > 0) {
+      ctx.reply(`❌ Admin (ID: ${adminId}) bazadan o'chirildi!`);
+    } else {
+      ctx.reply(`⚠️ Bunday ID raqamdagi admin bazadan topilmadi.`);
+    }
+  } catch (err) {
+    console.error('❌ Admin o\'chirishda xatolik:', err);
+    ctx.reply(`⚠️ Xatolik yuz berdi: ${err.message}`);
   }
 });
+
+// 3. ✅ YANGI: Adminlar ro'yxatini ko'rish — /addadmin ishlayotganini tekshirish
+// va navbat (activeOrdersCount) qanday taqsimlanayotganini ko'rish uchun
+bot.command('adminlar', async (ctx) => {
+  if (ctx.from.id !== SUPER_ADMIN_ID) return;
+  try {
+    const admins = await Admin.find({}).sort({ activeOrdersCount: 1, _id: 1 });
+    if (!admins.length) {
+      return ctx.reply("⚠️ Hozircha bazada birorta ham yordamchi admin yo'q.\nQo'shish uchun: /addadmin <telegram_id> <ism>");
+    }
+    let msg = `👥 <b>Adminlar ro'yxati (${admins.length} ta):</b>\n\n`;
+    admins.forEach((a, i) => {
+      msg += `${i + 1}. <b>${a.fullName}</b> — <code>${a.telegramId}</code>\n`;
+      msg += `   📱 ${a.phone} | 📦 Buyurtmalar: ${a.activeOrdersCount || 0} | ${a.isActive ? '✅ Faol' : '❌ Faol emas'}\n\n`;
+    });
+    ctx.reply(msg, { parse_mode: 'HTML' });
+  } catch (err) {
+    console.error('❌ Adminlarni olishda xatolik:', err);
+    ctx.reply(`⚠️ Xatolik: ${err.message}`);
+  }
+});
+
+// ==========================================
+// ✅ TUZATISH #6: Telegraf global xatolik ushlagichi — bironta ham kutilmagan
+// xato butun botni "yiqitmasligi" uchun, va server logida aniq ko'rinishi uchun
+// ==========================================
+bot.catch((err, ctx) => {
+  console.error(`❌ Botda kutilmagan xatolik (update turi: ${ctx.updateType}):`, err);
+});
+
 // Botni ishga tushirish
 bot.launch()
     .then(() => console.log('🤖 Bot muvaffaqiyatli ishga tushdi!'))
-    .catch((err) => console.error('❌ Botni ishga tushirishda xatolik:', err));
+    .catch((err) => {
+        console.error('❌ Botni ishga tushirishda xatolik:', err);
+        if (err.response && err.response.error_code === 409) {
+            console.error('⚠️ 409 Conflict: Ehtimol shu tokenni ishlatuvchi ESKI bot jarayoni serverda hali ham ishlab turibdi. `pm2 list` bilan tekshirib, eskisini to\'liq o\'chiring.');
+        } else if (err.response && err.response.error_code === 401) {
+            console.error('⚠️ 401 Unauthorized: BOT_TOKEN noto\'g\'ri yoki .env fayldan to\'g\'ri o\'qilmayapti.');
+        }
+    });
 
 // Dastur to'xtaganda bazani yopish
 process.once('SIGINT', () => bot.stop('SIGINT'));
