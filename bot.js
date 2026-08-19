@@ -59,8 +59,8 @@ async function getNextAvailableAdmin() {
 // 🚀 UMUMIY QISM — Bosh menyu matni va tugmalari bitta joyda saqlanadi
 // ==========================================
 const START_MENU_TEXT = `━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `                          ✨ <b>DIL IZHORIM</b> ✨\n` +
-    `                                  <b><i>by Munira</i></b>\n` +
+    `✨✨✨ <b>DIL IZHORIM</b> ✨✨✨\n` +
+    `『 <b><i>by Munira</i></b> 』\n` +
     `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `Yuragingizda aytolmay yurgan gaplaringiz bormi? \n` +
     `Yaqin insoningizni kutilmagan tarzda xursand qilmoqchimisiz? ❤️\n\n` +
