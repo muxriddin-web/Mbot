@@ -265,8 +265,12 @@ bot.action(/^cat_/, async (ctx) => {
 });
 
 // Matn kelganda bosqichma-bosqich qabul qilish
-bot.on('text', async (ctx) => {
-    if (!ctx.session || !ctx.session.step) return;
+bot.on('text', async (ctx, next) => {
+    // ✅ TUZATISH #7: agar bu foydalanuvchida faol "session bosqichi" bo'lmasa
+    // (masalan u /addadmin kabi buyruq yuborgan bo'lsa), next() chaqirilishi SHART —
+    // aks holda pastdagi bot.command(...) handlerlari HECH QACHON ishga tushmaydi,
+    // chunki Telegraf middleware zanjiri shu yerda to'xtab qolardi.
+    if (!ctx.session || !ctx.session.step) return next();
 
     const text = ctx.message.text ? ctx.message.text.trim() : '';
     const userId = ctx.from.id;
