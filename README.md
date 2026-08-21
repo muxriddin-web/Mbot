@@ -11,7 +11,7 @@ Dil-Izhorim Bot is an automated Telegram bot designed to deliver heartfelt messa
 🗄 Secure Data Management: Efficiently manages user preferences and event records using an isolated database structure.
 
 🛠 Tech Stack
-The project is built on a modern, high-performance Node.js backend:
+  The project is built on a modern, high-performance Node.js backend:
 
 Node.js — Asynchronous JavaScript runtime powering the core bot logic.
 
