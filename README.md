@@ -30,5 +30,5 @@ The architecture follows a modular, server-side structure:
 
 2.  Dual Database Connections: Operates separate connections for general bot data and specific             birthday    record collections to ensure data isolation.
 
-Process Execution: Runs continuously on a Linux environment via PM2 in fork mode, optimizing memory usage and ensuring instant auto-restarts upon server reboots.
+3.  Process Execution: Runs continuously on a Linux environment via PM2 in fork mode, optimizing           memory usage and ensuring instant auto-restarts upon server reboots.
 
