@@ -13,15 +13,15 @@ Dil-Izhorim Bot is an automated Telegram bot designed to deliver heartfelt messa
 🛠 Tech Stack
   The project is built on a modern, high-performance Node.js backend:
 
-Node.js — Asynchronous JavaScript runtime powering the core bot logic.
+  Node.js — Asynchronous JavaScript runtime powering the core bot logic.
 
-MongoDB — NoSQL database used for persistent storage of user data and birthday schedules.
+  MongoDB — NoSQL database used for persistent storage of user data and birthday schedules.
 
-Mongoose — Object Data Modeling (ODM) library for reliable MongoDB schema validation and database queries.
+  Mongoose — Object Data Modeling (ODM) library for reliable MongoDB schema validation and database      queries.
 
-Dotenvx (.env) — Encrypted environment variable management for securing API keys and secrets.
+  Dotenvx (.env) — Encrypted environment variable management for securing API keys and secrets.
 
-PM2 — Production process manager keeping the application active 24/7 with continuous monitoring.
+  PM2 — Production process manager keeping the application active 24/7 with continuous monitoring.
 
 📐 How It Works
 The architecture follows a modular, server-side structure:
