@@ -24,9 +24,9 @@ Dotenvx (.env) — Encrypted environment variable management for securing API ke
 📐 How It Works
 The architecture follows a modular, server-side structure:
 
-Core Handler (bot.js): Interacts directly with the Telegram Bot API to parse incoming commands and trigger event handlers.
+1.  Core Handler (bot.js): Interacts directly with the Telegram Bot API to parse incoming commands and     trigger event handlers.
 
-Dual Database Connections: Operates separate connections for general bot data and specific birthday record collections to ensure data isolation.
+2.  Dual Database Connections: Operates separate connections for general bot data and specific             birthday    record collections to ensure data isolation.
 
 Process Execution: Runs continuously on a Linux environment via PM2 in fork mode, optimizing memory usage and ensuring instant auto-restarts upon server reboots.
 PM2 — Production process manager keeping the application active 24/7 with continuous monitoring.
