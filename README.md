@@ -21,6 +21,8 @@ Mongoose — Object Data Modeling (ODM) library for reliable MongoDB schema vali
 
 Dotenvx (.env) — Encrypted environment variable management for securing API keys and secrets.
 
+PM2 — Production process manager keeping the application active 24/7 with continuous monitoring.
+
 📐 How It Works
 The architecture follows a modular, server-side structure:
 
@@ -29,4 +31,4 @@ The architecture follows a modular, server-side structure:
 2.  Dual Database Connections: Operates separate connections for general bot data and specific             birthday    record collections to ensure data isolation.
 
 Process Execution: Runs continuously on a Linux environment via PM2 in fork mode, optimizing memory usage and ensuring instant auto-restarts upon server reboots.
-PM2 — Production process manager keeping the application active 24/7 with continuous monitoring.
+
